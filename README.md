@@ -8,3 +8,6 @@ This script allows you to export a .OBJ file from a Sketchfab model by clicking 
 Installation:  
   You must install the userscript to see the 'Download .OBJ' button on the model viewer page.  
   I have tested the script so far on Tampermonkey (Chrome) and Greasemonkey (Firefox).  
+
+Todo:  
+  Add UV support
