@@ -43,10 +43,11 @@ function OBJforGeometry(geom) {
 };
 
 var vertexOffset = 0;
+var numUndefinedObjNames = 0;
 function OBJforGeometryInfo(info) {
     if (!info)
         return;
-    var obj = '#name: ' + info.name + '\n';
+    var obj = 'o ' + (info.name ? info.name : ++numUndefinedObjNames) + '\n';
     for (var i = 0; i < info.vertices.length; i += 3) {
         obj += 'v ';
         for (j = 0; j < 3; ++j) {
@@ -138,7 +139,6 @@ window.dlOBJ = function() {
     }
     downloadLink.click();
 };
-
 var ul = getElementByXpath('//*[@id="main-menu"]/ul');
 var li=document.createElement("li");
 li.innerHTML='<a class="order-model" id="downloadOBJ"><span>Download .OBJ</span></a>';
