@@ -1,0 +1,762 @@
+#include <hidef.h>      /* common defines and macros */
+#include "derivative.h"      /* derivative-specific definitions */
+
+
+#define gridSize 8
+#define data 1
+#define cmd 0
+#define rs 0x01
+#define e 0x02
+
+#define	closedEmpty 0
+#define	empty 1
+#define	closedMined 2
+#define	mined 3
+
+#define fa 34383
+#define sol 30612
+#define la 27272
+#define si 24340
+#define mi 36363
+#define re 40816
+#define Do 45801
+
+
+
+//unsigned char olacak
+const unsigned int keypad[4][4] =
+{
+'1','2','3','A',
+'4','5','6','B',
+'7','8','9','C',
+'*','0','#','D'
+};
+
+unsigned int grid[gridSize][gridSize] = {{2,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0},
+											{0,0,0,0,0,0,0,0}};
+
+unsigned int column,row;
+int musicOn = 0;
+int weather= 1;
+
+unsigned char ch=5;
+unsigned int a =  0;
+int degree = 0;
+int index = 0;
+unsigned long delayBuzzer = 0;
+unsigned char pcKey;
+int x=0,y=0;
+unsigned int sciInt = 0;
+int outputCompare = 183;
+int delay_value = 3000;
+
+int music[28] = {la,la,sol,fa,fa,sol,la,sol,sol,fa,mi,mi,fa,sol,fa,fa,mi,re,re,mi,fa,fa,fa,mi,fa,re,re,re} ;
+
+//Mined
+int isCellEmpty(unsigned int grid[][gridSize],int x,int y);
+void initGrid(unsigned int grid[][gridSize]);
+int isLocationLegal(int x,int y);
+int openCell(unsigned int grid[][gridSize],int x,int y);
+void minesweeper(unsigned int grid[][gridSize]);
+void neighbor(unsigned int grid[][gridSize],int x, int y);
+int countEmptyCell(unsigned int grid[][gridSize]);
+int openMined(unsigned int grid[][gridSize]);
+
+void fillLed(unsigned int grid[][gridSize]);
+void fillLedMine(unsigned int grid[][gridSize]);
+
+//MAX7219
+void Write_Max7219_byte(unsigned char DATA);
+void Write_Max7219(unsigned char address, unsigned char dat);
+void Init_MAX7219(void);
+void delay();
+void ledStup();
+void writeOnLed(unsigned int display[8]);
+
+//LCD
+void openlcd(void);
+void putlcd(unsigned char c, char type);
+void putslcd(unsigned char* ptr);
+void initGame(void);
+
+void sevenSegment(unsigned char value);
+void RemainRound(int round);
+
+unsigned int keyPad();
+unsigned int OnlykeyPad();
+
+void delay(int d);
+
+interrupt (((0x10000-Vtimch5)/2)-1) void buzzer(void);
+interrupt (((0x10000-Vtimovf)/2)-1) void timer(void);
+interrupt (((0x10000 - Vsci0)/2)-1) void seraialPort(void);
+
+void main(void) {
+ 
+  DDRB = 0xFF;
+  ATD0CTL2 = 0x80;     //Turn on ADC,..No Interrupt
+  delay(5);
+  ATD0CTL3 = 0x08;  //one conversion, no FIFO
+  ATD0CTL4 = 0xEB;  //8-bit resolu, 16-clock for 2nd phase,
+ 
+ 
+  initGame();
+
+	EnableInterrupts;
+
+
+  for(;;) {
+    _FEED_COP();
+  } 
+}
+
+void initGame() {
+  
+  int remainTime = 5;
+  DDRP = 0x00;
+
+	ledStup();//led initail
+	openlcd();//lcd initial
+  
+  putslcd("KeyPad 0");
+  putlcd(0xC0,cmd);
+  
+  putslcd("PC 1");
+  
+  sciInt = keyPad();
+  
+  if (sciInt > 0) {
+  
+     /**************///serial port
+    SCI0BDH = 0x00;
+    SCI0BDL = 0x1A;
+    SCI0CR1 = 0x00;
+    SCI0CR2 = 0x2C;
+    TSCR1 = 0x00;
+    TSCR2 = 0x00;
+    /****************************/
+    outputCompare = 183;
+    delay_value = 250;
+    musicOn = 0;
+  }else   {
+     TSCR2 = 0x80;
+      musicOn = 1;
+      TSCR1 = 0x80;
+       DDRT = DDRT | 0x20;  
+      TIOS |= TIOS_IOS5_MASK;
+      TCTL1 = 0x04;
+      TIE = 0x20;
+      TFLG2 |= 0x80;
+  }
+  __asm CLI;
+  
+  putlcd(0x01,cmd);
+  putlcd(0x80,cmd);
+
+	delay(500);
+	
+	putslcd("Start Game");
+	putlcd(0xC0,cmd);
+	putslcd("Slct Game Degree");
+	delay(500);
+	
+	DDRH = 0x00;
+	while(remainTime > 0) {
+	    sevenSegment(remainTime);
+	    delay(800);
+	    remainTime--;
+	    
+	    if (PTH == 0x01) {
+	      degree =1;
+	      remainTime = 0;
+	    }else if (PTH == 0x02) {
+	      degree =2;
+	      remainTime = 0;
+	    }else if (PTH == 0x03) {
+	      degree =3;
+	      remainTime = 0;
+	    }
+	}
+	
+	putlcd(0x01,cmd);
+  	putlcd(0x80,cmd);
+  
+ 	initGrid(grid);//mine initial
+	fillLed(grid);
+	minesweeper(grid);
+}
+
+void fillLed(unsigned int grid[][gridSize]) {
+
+   int i,j;
+   int temp = 0x00;
+   int display[8] = {0};;
+   
+   for (i = 0; i < gridSize; i++) {
+      for (j = 0; j < gridSize; j++) {
+      
+        if(grid[i][gridSize - j - 1] == empty)
+          temp |= 0;
+        else
+          temp |= 1;
+        if (j < 7)
+        temp = temp << 1;
+        
+      }
+      
+      
+      display[i] = temp;
+      temp = 0;
+   }
+    
+   writeOnLed(display);
+}
+
+void writeOnLed(unsigned int display[8]) {
+  
+  int i;
+    
+    for (i = 1; i < 9; i++) {
+      Write_Max7219(9 - i, display[i - 1]);
+    }
+
+    delay(500);
+}
+
+void fillLedMine(unsigned int grid[][gridSize]) {
+
+   int i,j;
+   int temp = 0x00;
+   int display[8] = {0};
+   
+   for (i = 0; i < gridSize; i++) {
+      for (j = 0; j < gridSize; j++) {
+      
+        if(grid[i][gridSize - j - 1] == mined)
+          temp |= 0x01;
+        else
+          temp |= 0x00;
+        if (j < 7)
+          temp = temp << 1;
+  
+      }
+      display[i] = temp;
+      
+      temp = 0;    
+   }
+    
+   writeOnLed(display);
+}
+
+void RemainRound(int round) {
+
+  DDRP |= 0x0F;
+  PTP = 0x0E;
+  
+  sevenSegment(round);
+  delay(1000);
+  PORTB = 0x00;
+
+  PTP = 0xFF;
+}
+
+void minesweeper(unsigned int grid[][gridSize])
+{
+	/*oyunun ana fonksiyonudur islemler burada gerceklesir diger fonksiyonlar burada cagirilir.*/
+	int move=0,lost=1;
+	char d;
+	int emp=0, round = 2;
+	 DDRB = 0xFF;
+	emp = countEmptyCell(grid);
+	
+	
+	while(emp != 0 && lost != 0 && round != 0)
+	{
+
+		putslcd("Enter Locations");
+		delay(800);
+		putlcd(0x01,cmd);
+		putlcd(0x80,cmd);
+		putslcd("x:");
+        x = keyPad();
+        PORTB = x;
+		putlcd(0x01,cmd);
+		putlcd(0x80,cmd);
+		putslcd("y:");
+        y = keyPad();
+        PORTB = y;
+		putlcd(0x01,cmd);
+		putlcd(0x80,cmd);	
+
+		if(isLocationLegal(x,y) == 1)
+		{
+			move++;
+
+			if(isCellEmpty(grid,x,y) == 1){
+			  	openCell(grid,x,y);
+			}
+			else{
+			  lost=0;
+			}
+				
+
+		}
+		else 
+		{
+		    putslcd("Wrong Location");
+		    RemainRound(round);
+		    round--;
+		    delay(1000);
+		    putlcd(0x01,cmd);
+		    putlcd(0x80,cmd);
+		}
+
+		emp = countEmptyCell(grid);
+
+		if(lost != 0)
+			fillLed(grid);
+	}
+	
+	if(lost == 0 || round == 0)
+	{
+		openMined(grid);
+		putslcd("Game over");
+	
+	}
+	else{
+	  putslcd("You Win");
+	}
+		
+}
+
+void initGrid(unsigned int grid[][gridSize])
+{
+	unsigned int i=0,j=0;
+	unsigned int rnd;
+	int totalMine = 0;
+	
+	if (degree != 0){  
+	  	for (i = 0; i < gridSize; ++i)
+	  	{
+	  		for (j = 0;j  < gridSize; ++j)
+	  		{
+				rnd = rand()%3;
+				
+				if(rnd == 0 || rnd == 1) 
+					grid[i][j] = closedEmpty;
+				else if (rnd == 2)
+				{
+					if (degree == 1 && totalMine <= 5) {
+						grid[i][j] = closedMined;
+						totalMine++;  
+					}else if (degree == 2 && totalMine <= 15){
+						grid[i][j] = closedMined;
+						totalMine++;  
+					}else if (totalMine <= 25){
+						grid[i][j] = closedMined;
+						totalMine++;  
+					}
+				}
+	  		}
+	  	}	
+	}
+}
+
+int isCellEmpty(unsigned int grid[][gridSize],int x,int y)
+{
+	/*return value int result=0 if the unsigned int is not an empty unsigned int and result=1 the unsigned int is an empty unsigned int.*/
+	/*lokasyon bos ise return 1 yapıyor.*/
+	if(grid[x][y] == 1 || grid[x][y] == 0){
+	  
+	 	return 1;
+	}
+	
+	else{
+		return 0;
+	}	
+}
+
+int isLocationLegal(int x,int y)
+{
+	/*return value int result=0 if the location is illegal and result=1 if the location is legal(in the grid).*/
+	/*girilen lokasyon matrixin boyutundan buyuk olup olmadigini kontrol ediyor. yanlis buyukluk girilirse return 0 doner.*/
+	if((x >= gridSize || x < 0x00) || (y >= gridSize || y < 0x00))
+		return 0;
+	else 
+		return 1;
+}
+
+int openCell(unsigned int grid[][gridSize],int x,int y)
+{
+	/*return value int result = -2 when the unsigned int is not opened
+	 with the case of illegal location; or flagged unsigned int.*/
+
+	if(grid[x][y] == 0)
+	{
+		grid[x][y] = 1;
+		neighbor(grid,x,y);
+	}
+
+	return 1;
+}
+
+void neighbor(unsigned int grid[][gridSize], int x, int y)
+{
+	/* bellirli unsigned int in komsularinin bos olup olmadigini bul.*/
+	int i,j;
+
+	for(i = x - 1; i <= x + 1; i++)
+	{
+		for(j = y - 1; j <= y + 1; j++)
+		{
+			if(isLocationLegal(i,j) != 0)
+			{
+				if(grid[i][j] == 0)
+				{
+					grid[i][j] = empty;
+				}
+			}
+
+		}
+
+	}
+}
+
+int countEmptyCell(unsigned int grid[][gridSize])
+{
+	unsigned int emp=0;
+	unsigned int i=0,j=0;
+	/*tablodaki tum bos unsigned int leri hesapliyor. eger bos sayilar bitmezse oyun bitmiyor. flagler oncesinde bos ise oyun devam ediyor.*/
+	for (i = 0; i < gridSize; ++i)
+	{
+		for (j = 0; j < gridSize; ++j)
+		{
+			if(grid[i][j] == closedEmpty)
+				emp++;
+		}
+	}
+
+	return emp;
+}
+
+int openMined(unsigned int grid[][gridSize])
+{
+	unsigned int i=0,j=0;
+
+	for(i=0;i<gridSize;i++)
+	{
+		for(j=0;j<gridSize;j++)
+		{
+			if(grid[i][j] == 2)
+			{
+				grid[i][j] = mined;
+			} else {
+			  grid[i][j] = 1;
+			}
+
+		}
+
+	}
+
+	fillLedMine(grid);
+	
+	return 1;
+}
+//   http://www.sertandeniz.com/2015/01/8x8-dot-matrix-board-kullanimi/
+void Write_Max7219_byte(unsigned char DATA)
+{
+    unsigned char spiData;
+   
+    PTT &= ~0x01; 
+    while (!(SPI0SR & SPI0SR_SPTEF_MASK)); 
+    SPI0DR  =  DATA;
+    while (!(SPI0SR & SPI0SR_SPIF_MASK));
+    spiData = SPI0DR;
+}
+
+void Write_Max7219(unsigned char address, unsigned char dat) {
+  PTT &= ~0x80; //cs low  PTT 7
+  Write_Max7219_byte(address);
+  Write_Max7219_byte(dat);
+  PTT |= 0x80;  //cs high PTT 7
+}
+
+void Init_MAX7219(void) {
+  Write_Max7219(0x09, 0x00);
+  Write_Max7219(0x0a, 0x03);
+  Write_Max7219(0x0b, 0x07);
+  Write_Max7219(0x0c, 0x01);
+  Write_Max7219(0x0f, 0x00);
+}
+
+void delay(unsigned int time) {
+  
+  unsigned int i,j;
+
+  for (i = 0; i < time;  i++){
+    for(j = 0; j < delay_value; j++);
+  }
+}
+
+void ledStup() {
+  
+  SPI0BR  = 0x01; //01
+  SPI0CR1 = 0x58; //no interrupt, SPI master ,active high     58
+  SPI0CR2 = 0x00;  // no bidirection no tramsfer during wait
+  WOMS    = 0x00; //enable pull up resistor
+
+
+  DDRT |= 0xE0;
+  DDRH = 0xFF;
+  delay(50);
+  Init_MAX7219();
+}
+
+void openlcd(void) {
+
+  DDRK = 0xFF;
+  
+  delay(100);
+  
+  putlcd(0x28,cmd);
+  putlcd(0x0F,cmd);
+  putlcd(0x06,cmd);
+  putlcd(0x01,cmd);
+  
+  delay(2);
+}
+
+void putlcd(unsigned char c, char type) {
+
+  char lo,hi;
+  
+  hi = (c & 0x0F) << 2;
+  lo = (c & 0xF0) >> 2;
+  
+  PORTK &= (~rs);
+  
+  if (type == data)
+    PORTK = lo | rs;
+  else
+    PORTK = lo; 
+  
+  PORTK |= e;
+  
+  __asm(nop);
+  __asm(nop);
+  __asm(nop);
+  
+  PORTK &= (~e);
+  if (type == data)
+    PORTK = hi | rs;
+  else
+    PORTK = hi;
+  
+  PORTK |= e;
+  
+  __asm(nop);
+  __asm(nop);
+  __asm(nop); 
+  
+  PORTK &= (~e);
+  
+  delay(1); 
+}
+
+void putslcd(unsigned char* ptr) {
+
+  while(*ptr){
+  
+    putlcd(*ptr,data);
+    
+    ptr++;
+    delay(1);
+  }
+}
+
+unsigned int keyPad() {
+
+  unsigned int result;
+  pcKey = 0;
+  
+
+  if (sciInt == 1){
+    while(pcKey == 0);
+    result =  pcKey & 0x0F;
+  }
+  else if (sciInt == 0)
+    result = OnlykeyPad();
+  
+   return result;
+}
+//http://www.microdigitaled.com/HCS12/Hardware/Dragon12/CodeWarrior/CW_Keypad_to_PORTB_CProg.txt
+unsigned int OnlykeyPad() {
+      
+      unsigned int result;
+ 
+      DDRA = 0x0F;                           //MAKE ROWS INPUT AND COLUMNS OUTPUT
+                                          //OPEN WHILE(1)
+      do{                                 //OPEN do1
+         PORTA = PORTA | 0x0F;            //COLUMNS SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+      }while(row == 0x00);                //WAIT UNTIL KEY PRESSED //CLOSE do1
+
+
+
+      do{                                 //OPEN do2
+         do{                              //OPEN do3
+            delay(1);                   //WAIT
+            row = PORTA & 0xF0;           //READ ROWS
+         }while(row == 0x00);             //CHECK FOR KEY PRESS //CLOSE do3
+         
+         delay(15);                     //WAIT FOR DEBOUNCE
+         row = PORTA & 0xF0;
+      }while(row == 0x00);                //FALSE KEY PRESS //CLOSE do2
+
+      while(1){                           //OPEN while(1)
+         PORTA &= 0xF0;                   //CLEAR COLUMN
+         PORTA |= 0x01;                   //COLUMN 0 SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+         if(row != 0x00){                 //KEY IS IN COLUMN 0
+            column = 0;
+            break;                        //BREAK OUT OF while(1)
+         }
+         PORTA &= 0xF0;                   //CLEAR COLUMN
+         PORTA |= 0x02;                   //COLUMN 1 SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+         if(row != 0x00){                 //KEY IS IN COLUMN 1
+            column = 1;
+            break;                        //BREAK OUT OF while(1)
+         }
+
+         PORTA &= 0xF0;                   //CLEAR COLUMN
+         PORTA |= 0x04;                   //COLUMN 2 SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+         if(row != 0x00){                 //KEY IS IN COLUMN 2
+            column = 2;
+            break;                        //BREAK OUT OF while(1)
+         }
+         PORTA &= 0xF0;                   //CLEAR COLUMN
+         PORTA |= 0x08;                   //COLUMN 3 SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+         if(row != 0x00){                 //KEY IS IN COLUMN 3
+            column = 3;
+            break;                        //BREAK OUT OF while(1)
+         }
+         row = 0;                         //KEY NOT FOUND
+      break;                              //step out of while(1) loop to not get stuck
+      }                                   //end while(1)
+
+      if(row == 0x10){
+         result=keypad[0][column];         //OUTPUT TO PORTB LED
+ 
+      }
+      else if(row == 0x20){
+         result=keypad[1][column];
+ 
+      }
+      else if(row == 0x40){
+         result=keypad[2][column];
+ 
+      }
+      else if(row == 0x80){
+         result=keypad[3][column];
+ 
+      }
+      
+      do{
+         delay(15);
+         PORTA = PORTA | 0x0F;            //COLUMNS SET HIGH
+         row = PORTA & 0xF0;              //READ ROWS
+      }while(row != 0x00);                //MAKE SURE BUTTON IS NOT STILL HELD
+   
+      PORTA = 0x00;
+	return result & 0x0F;
+}
+
+void sevenSegment(unsigned char value) {
+
+
+  value = value & 0x0F;
+
+  if (value == 0)
+    PORTB = 0x3F;
+  else if (value == 1)
+    PORTB = 0x06;
+  else if (value == 2)
+    PORTB = 0x5B;
+  else if (value == 3)
+    PORTB = 0x4F;
+  else if (value == 4)
+    PORTB = 0x66;
+  else if (value == 5)
+    PORTB = 0x6D;
+  else if (value == 6)
+    PORTB = 0x7D;
+  else if (value == 7)
+    PORTB = 0x07;
+  else if (value == 8)
+    PORTB = 0xFF;
+  else if (value == 9)
+    PORTB = 0x67;
+}
+
+interrupt (((0x10000-Vtimch5)/2)-1) void buzzer(void) {
+  
+  
+  
+  if (index == 28)
+    index = 0;
+  
+  if (musicOn == 1)
+    TC5 = TCNT + music[index];
+  
+  if (delayBuzzer >= outputCompare) {
+    weather = 1;
+    delayBuzzer = 0;
+    index++;
+  }
+  
+  
+  
+  TFLG1 |= TFLG1_C5F_MASK;
+}
+
+interrupt (((0x10000-Vtimovf)/2)-1) void timer(void) {
+  
+    ATD0CTL5 = 0x84;  //Channel 4 (right justified, unsigned,single-conver,one chan only) 
+
+    if (ATD0DR0L <= 9 && weather == 1) {
+      putlcd(0x01,cmd);
+  	  putlcd(0x80,cmd);
+      putslcd("The weather");
+      putlcd(0xC0,cmd);
+      putslcd("is Dark");
+      delay(500);
+      putlcd(0x01,cmd);
+  	  putlcd(0x80,cmd);
+  	  weather = 0; 
+    }
+
+    
+    delayBuzzer++;   
+    TFLG2 |= TFLG2_TOF_MASK;
+}
+interrupt (((0x10000 - Vsci0)/2)-1) void seraialPort(void){
+    
+    if(SCI0SR1_RDRF_MASK & SCI0SR1){  
+       pcKey = SCI0DRL;
+       PORTB = pcKey;
+    }
+    
+     if (SCI0SR1 & SCI0SR1_TDRE_MASK) {
+  
+    SCI0DRL = pcKey;
+  }
+}
